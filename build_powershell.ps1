@@ -8,7 +8,7 @@ Remove-Item -Recurse -Force .\dist, .\build, .\app.spec -ErrorAction Ignore
 pyinstaller app.py `
     --name "StomaScope" `
     --icon "assets/stomaScope.ico" `
-    --onedir `
+    --onefile `
     --noconsole `
     --clean `
     --paths "C:/Users/erunyan/AppData/Local/Programs/Python/Python311" `
