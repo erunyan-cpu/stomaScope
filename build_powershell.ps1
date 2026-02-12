@@ -18,7 +18,7 @@ pyinstaller app.py `
     --collect-submodules torch `
     --collect-data torch `
     --collect-data customtkinter `
-    --add-data "models/best_stomata_model.pth;models" `
+    --add-data "model/best_stomata_model.pth;models" `
     --hidden-import=torch.distributed `
     --hidden-import=torch.distributed.rpc `
     --hidden-import=segmentation_models_pytorch `
