@@ -11,7 +11,7 @@ pyinstaller app.py `
     --onedir `
     --noconsole `
     --clean `
-    --paths "C:/Users/erunyan/AppData/Local/Programs/Python/Python311" `  # update path if not your laptop
+    --paths "C:/Users/erunyan/AppData/Local/Programs/Python/Python311" `
     --collect-submodules torch `
     --collect-data torch `
     --collect-data customtkinter `
