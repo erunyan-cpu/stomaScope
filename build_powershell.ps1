@@ -4,6 +4,9 @@ Set-Location -Path ".."
 # Clean old builds
 Remove-Item -Recurse -Force .\dist, .\build, .\app.spec -ErrorAction Ignore
 
+# Grant activate status
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
 # PyInstaller build
 pyinstaller app.py `
     --name "StomaScope" `
