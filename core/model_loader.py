@@ -5,7 +5,7 @@ import warnings
 import os
 import sys
 
-MODEL_RELATIVE_PATH = "models/best_stomata_model.pth"
+MODEL_RELATIVE_PATH = "model/best_stomata_model.pth"
 
 
 def resource_path(relative_path):
@@ -46,8 +46,6 @@ def get_device():
 def load_model():
     device = get_device()
 
-    # IMPORTANT: Do NOT use encoder_weights="imagenet" in frozen apps
-    # It may attempt internet download if weights missing.
     model = smp.Unet(
         encoder_name="resnet34",
         encoder_weights=None,  # safer for packaged builds

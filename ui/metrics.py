@@ -14,6 +14,7 @@ import matplotlib
 matplotlib.use("Agg") 
 import matplotlib.pyplot as plt
 from jinja2 import Template
+from ui.html_reporting import write_html_report, write_group_html_report
 
 def plot_qc(df, outpath):
     fig, axs = plt.subplots(1, 2, figsize=(4, 3))
@@ -167,230 +168,7 @@ mpl.rcParams.update({
     "axes.spines.top": False,
     "axes.spines.right": False
 })
-
-# -----------------------------
-# HTML template (your original)
-# -----------------------------
-HTML_TEMPLATE = """
-<html>
-<head>
-<title>{{ leaf_id }} – StomaScope Report</title>
-
-<style>
-body {
-  font-family: Arial, sans-serif;
-  margin: 30px;
-  background-color: #f9f9f9;
-  color: #222;
-}
-
-h1, h2 { margin-bottom: 10px; }
-
-.tab { display: none; }
-
-.tab-buttons {
-  margin-bottom: 25px;
-}
-
-.tab-buttons button {
-  padding: 10px 16px;
-  margin-right: 8px;
-  cursor: pointer;
-  border: none;
-  border-radius: 6px;
-  background-color: #0078D7;
-  color: white;
-  font-weight: bold;
-}
-
-.tab-buttons button:hover {
-  background-color: #005A9E;
-}
-
-.plot-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 28px;
-  margin-bottom: 35px;
-  justify-content: center;
-  align-items: flex-start;
-}
-
-.plot-col {
-  flex: 1 1 320px;
-  max-width: 420px;
-  text-align: center;
-}
-
-svg {
-  width: 100%;
-  height: auto;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  background-color: white;
-  padding: 6px;
-}
-
-table {
-  border-collapse: collapse;
-  margin-bottom: 25px;
-  width: 100%;
-  max-width: 520px;
-}
-
-td, th {
-  padding: 8px 12px;
-  border: 1px solid #ccc;
-  text-align: left;
-}
-
-th {
-  background-color: #f1f1f1;
-}
-
-th:hover {
-  cursor: help;
-  background-color: #e6f2ff;
-}
-</style>
-
-<script>
-function showTab(id) {
-  document.querySelectorAll('.tab').forEach(t => t.style.display = 'none');
-  document.getElementById(id).style.display = 'block';
-}
-</script>
-</head>
-
-<body>
-
-<h1>StomaScope Report – {{ leaf_id }}</h1>
-
-<div class="tab-buttons">
-  <button onclick="showTab('summary_morphology')">Summary & Morphology</button>
-  <button onclick="showTab('spatial_qc')">Spatial & QC</button>
-</div>
-
-<!-- ================= SUMMARY & MORPHOLOGY ================= -->
-<div id="summary_morphology" class="tab" style="display:block;">
-
-<h2>Summary</h2>
-<table>
-<tr>
-  <th title="Total number of stomata detected in the image.">
-    Total stomata
-  </th>
-  <td>{{ n_stomata }}</td>
-</tr>
-<tr><th title="Mean distance to nearest neighboring stomata (µm)">Mean NN distance (µm)</th>
-    <td>{{ nn_mean | round(2) }}</td></tr>
-<tr><th title="Coefficient of variation of NN distances">NN distance CV</th>
-    <td>{{ nn_cv | round(2) }}</td></tr>
-<tr><th title="Stomatal density (per mm²)">Density (stomata/mm²)</th>
-    <td>{{ density_mm2 | round(2) }}</td></tr>
-<tr><th title="Fraction of leaf area covered by stomata">Packing fraction</th>
-    <td>{{ packing_fraction | round(2) }}</td></tr>
-<tr><th title="Alignment of stomata (0–1)">Orientation coherence</th>
-    <td>{{ orientation_coherence | round(2) }}</td></tr>
-</table>
-
-{% if csv_file %}
-<a href="{{ csv_file }}" download>Download raw feature data (CSV)</a>
-{% endif %}
-
-<h2>Morphology</h2>
-<div class="plot-row">
-
-{% if area_boxplot %}
-<div class="plot-col"
-title="Distribution of stomatal area. Healthy samples typically show a unimodal distribution; strong skew or bimodality may indicate mixed developmental states or segmentation artifacts.">
-{{ area_boxplot|safe }}
-</div>
-{% endif %}
-
-{% if aspect_ratio_boxplot %}
-<div class="plot-col"
-title="Aspect ratio reflects elongation of guard cells. Values near 1 indicate round shapes, while higher values indicate elongated stomata.">
-{{ aspect_ratio_boxplot|safe }}
-</div>
-{% endif %}
-
-{% if eccentricity_boxplot %}
-<div class="plot-col"
-title="Eccentricity describes deviation from circularity. Higher values correspond to elongated shapes and may correlate with developmental or species-level traits.">
-{{ eccentricity_boxplot|safe }}
-</div>
-{% endif %}
-
-{% if circularity_boxplot %}
-<div class="plot-col"
-title="Circularity measures boundary smoothness and compactness. Lower values can indicate segmentation noise or complex stomatal outlines.">
-{{ circularity_boxplot|safe }}
-</div>
-{% endif %}
-
-</div>
-</div>
-
-<!-- ================= SPATIAL & QC ================= -->
-<div id="spatial_qc" class="tab">
-
-<h2>Spatial Patterning & Morphospace</h2>
-<div class="plot-row">
-
-{% if nn_boxplot %}
-<div class="plot-col"
-title="Distribution of nearest neighbor distances. A narrow distribution suggests regular spacing, while wide tails suggest clustering or spatial heterogeneity.">
-{{ nn_boxplot|safe }}
-</div>
-{% endif %}
-
-{% if pca_plot %}
-<div class="plot-col"
-title="Principal Component Analysis of morphological features. Clusters may indicate distinct stomatal populations or technical artifacts.">
-{{ pca_plot|safe }}
-</div>
-{% endif %}
-
-{% if spatial_plot %}
-<div class="plot-col"
-title="Spatial map of stomatal centroids. Uniform coverage is expected; visible gradients or voids may indicate tissue structure or imaging bias.">
-{{ spatial_plot|safe }}
-</div>
-{% endif %}
-
-</div>
-
-<h2>Advanced / QC</h2>
-<div class="plot-row">
-
-{% if area_shape %}
-<div class="plot-col"
-title="Relationship between stomatal size and shape. Correlations here may reflect developmental constraints or segmentation thresholds.">
-{{ area_shape|safe }}
-</div>
-{% endif %}
-
-{% if orientation %}
-<div class="plot-col"
-title="Semi-polar histogram of stomatal major-axis orientations relative to the dominant tissue axis. 0° represents the most common orientation in the sample. A strong central peak indicates coordinated alignment, while broader or asymmetric distributions suggest weaker or heterogeneous patterning. Counts represent the number of stomata in each angular bin.">
-{{ orientation|safe }}
-</div>
-{% endif %}
-
-{% if qc_plot %}
-<div class="plot-col"
-title="Quality control plots used to identify segmentation artifacts and outlier objects.">
-{{ qc_plot|safe }}
-</div>
-{% endif %}
-
-</div>
-</div>
-
-</body>
-</html>
-"""
+    
 
 # -----------------------------
 # MetricsTab GUI
@@ -399,67 +177,60 @@ class MetricsTab:
     def __init__(self, parent, app):
         self.app = app
         self.mask_paths = []
+        self.grouped_masks = {}       # dict[group_name] = list of mask paths
+        self.grouped_stats = {}       # dict[group_name] = list of (leaf_id, stats_dict)
+        self.ungrouped_images = {}    # dict[image_path] = label widget
+        self._drag_data = None
+        self.group_widgets = {}
 
         container = ctk.CTkFrame(parent, fg_color="#1E1E1E", corner_radius=15)
         container.pack(fill="both", expand=True, padx=15, pady=15)
 
+        # Title
         self.title_label = ctk.CTkLabel(
-            container,
-            text="Stomata Metrics",
-            font=("Segoe UI", 28, "bold"),
-            text_color="white"
+            container, text="Stomata Metrics",
+            font=("Segoe UI", 28, "bold"), text_color="white"
         )
         self.title_label.pack(anchor="n", pady=(10, 20))
 
+        # Description
         description = (
             "Load binary masks and generate an HTML report for each sample.\n"
-            "Reports include summary, morphology, morphospace, spatial patterns, and QC plots."
+            "Drag images into groups, rename or delete groups, then run."
         )
         self.desc_label = ctk.CTkLabel(
-            container,
-            text=description,
-            font=("Segoe UI", 16),
-            text_color="lightgray",
-            wraplength=600,
-            justify="center"
+            container, text=description, font=("Segoe UI", 16),
+            text_color="lightgray", wraplength=600, justify="center"
         )
         self.desc_label.pack(anchor="n", pady=(0, 20))
 
+        # Buttons
         buttons_frame = ctk.CTkFrame(container, fg_color="#2D2D2D")
         buttons_frame.pack(anchor="n", pady=(0, 20))
 
         self.load_btn = ctk.CTkButton(
-            buttons_frame,
-            text="Load Mask(s)",
-            font=("Segoe UI", 16, "bold"),
-            fg_color="#0078D7",
-            hover_color="#005A9E",
-            width=180,
-            height=50,
-            corner_radius=12,
-            command=self.load_masks
+            buttons_frame, text="Load Mask(s)", font=("Segoe UI", 16, "bold"),
+            fg_color="#0078D7", hover_color="#005A9E", width=180, height=50,
+            corner_radius=12, command=self.load_masks
         )
         self.load_btn.pack(fill="x", pady=5)
 
+        self.new_group_btn = ctk.CTkButton(
+            buttons_frame, text="New Group", command=self.create_new_group
+        )
+        self.new_group_btn.pack(pady=5, fill="x")
+
         self.run_btn = ctk.CTkButton(
-            buttons_frame,
-            text="Generate Report",
-            font=("Segoe UI", 16, "bold"),
-            fg_color="#28A745",
-            hover_color="#1E7E34",
-            width=200,
-            height=50,
-            corner_radius=12,
-            state="disabled",
-            command=self.run_metrics
+            buttons_frame, text="Generate Report", font=("Segoe UI", 16, "bold"),
+            fg_color="#28A745", hover_color="#1E7E34", width=200, height=50,
+            corner_radius=12, state="disabled", command=self.run_metrics
         )
         self.run_btn.pack(fill="x", pady=5)
 
+        # Status and progress
         self.status = ctk.CTkLabel(
-            buttons_frame,
-            text="Waiting for masks",
-            font=("Segoe UI", 14, "italic"),
-            text_color="gray"
+            buttons_frame, text="Waiting for masks",
+            font=("Segoe UI", 14, "italic"), text_color="gray"
         )
         self.status.pack(anchor="w", pady=(10,2))
 
@@ -467,44 +238,65 @@ class MetricsTab:
         self.progress.set(0)
         self.progress.pack(anchor="w", pady=(0,10))
 
+        # Options
         self.csv_var = ctk.BooleanVar(value=False)
         self.keep_svgs_var = ctk.BooleanVar(value=False)
 
         ctk.CTkCheckBox(
-            buttons_frame,
-            text="Generate raw data CSV",
-            variable=self.csv_var,
-            font=("Segoe UI", 14)
+            buttons_frame, text="Generate raw data CSV",
+            variable=self.csv_var, font=("Segoe UI", 14)
         ).pack(anchor="w", pady=2)
 
         ctk.CTkCheckBox(
-            buttons_frame,
-            text="Keep SVGs (debug / advanced)",
-            variable=self.keep_svgs_var,
-            font=("Segoe UI", 14)
+            buttons_frame, text="Keep SVGs (debug / advanced)",
+            variable=self.keep_svgs_var, font=("Segoe UI", 14)
         ).pack(anchor="w", pady=2)
 
+        # ----------------- Main area -----------------
+        self.main_frame = ctk.CTkFrame(container, fg_color="#1E1E1E")
+        self.main_frame.pack(fill="both", expand=True)
 
-    # -----------------------------
-    # Load mask files
-    # -----------------------------
-    def load_masks(self):
-        paths = filedialog.askopenfilenames(
-            filetypes=[("TIFF Images", "*.tif *.tiff"), ("PNG", "*.png")]
+        # Ungrouped box
+        self.ungrouped_frame = ctk.CTkFrame(self.main_frame, fg_color="#2D2D2D", width=200)
+        self.ungrouped_frame.pack(side="left", fill="y", padx=5, pady=5)
+        ctk.CTkLabel(self.ungrouped_frame, text="Ungrouped",
+                     font=("Segoe UI", 14, "bold")).pack(pady=5)
+
+        self.groups_container = ctk.CTkFrame(self.main_frame, fg_color="#1E1E1E")
+        self.groups_container.pack(side="right", fill="both", expand=True)
+
+        # Canvas for groups
+        self.groups_canvas = ctk.CTkCanvas(self.groups_container, bg="#1E1E1E", height=320)
+        self.groups_canvas.pack(side="top", fill="both", expand=True)
+
+        # Frame inside canvas to hold group panels
+        self.groups_frame = ctk.CTkFrame(self.groups_canvas, fg_color="#1E1E1E")
+        self.groups_canvas.create_window((0, 0), window=self.groups_frame, anchor="nw")
+
+        # Update scroll region when groups_frame changes
+        self.groups_frame.bind(
+            "<Configure>",
+            lambda e: self.groups_canvas.configure(scrollregion=self.groups_canvas.bbox("all"))
         )
-        if not paths:
-            return
 
-        self.mask_paths = list(paths)
-        self.status.configure(text=f"{len(paths)} mask(s) loaded", text_color="green")
-        self.run_btn.configure(state="normal")
-        self.progress.set(0)
+        # Horizontal scrollbar (linked to canvas)
+        self.h_scroll = ctk.CTkScrollbar(
+            self.groups_container,
+            orientation="horizontal",
+            command=self.groups_canvas.xview
+        )
+        self.h_scroll.pack(side="bottom", fill="x", pady=(0,5))
+        self.groups_canvas.configure(xscrollcommand=self.h_scroll.set)
 
-    # -----------------------------
-    # Run metrics in background
-    # -----------------------------
+        # Make group panels expand horizontally
+        self.groups_frame.bind(
+            "<Configure>",
+            lambda e: self.groups_canvas.configure(width=max(self.groups_canvas.winfo_width(), self.groups_frame.winfo_reqwidth()))
+        )
+
+        # ----------------- Run metrics -----------------
     def run_metrics(self):
-        if not self.mask_paths:
+        if not self.grouped_masks:
             return
 
         self.run_btn.configure(state="disabled")
@@ -513,15 +305,12 @@ class MetricsTab:
 
         threading.Thread(target=self._metrics_thread, daemon=True).start()
 
-    # -----------------------------
-    # Background thread
-    # -----------------------------
+    # ----------------- Background thread -----------------
     def _metrics_thread(self):
+        from .html_reporting import write_group_html_report
         try:
-            # Use Desktop as fallback initial folder
-            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             folder = filedialog.askdirectory(
-                initialdir=desktop,
+                initialdir=os.path.join(os.path.expanduser("~"), "Desktop"),
                 title="Select folder to save reports"
             )
             if not folder:
@@ -531,47 +320,234 @@ class MetricsTab:
                 ))
                 return
 
+            # Normalize grouped_masks if empty
+            if not self.grouped_masks:
+                self.grouped_masks = {os.path.splitext(p)[0]: [p] for p in self.mask_paths}
+
+            self.grouped_stats = {}
+            total_images = sum(len(v) for v in self.grouped_masks.values())
+            processed = 0
+
             log_file = os.path.join(folder, "report_log.txt")
             with open(log_file, "a") as log:
                 log.write("Starting report generation...\n")
 
-            for i, mask_path in enumerate(self.mask_paths):
-                try:
+            # Compute stats
+            for group_name, paths in self.grouped_masks.items():
+                self.grouped_stats[group_name] = []
+                for mask_path in paths:
                     leaf_id = os.path.splitext(os.path.basename(mask_path))[0]
+                    try:
+                        mask_np = tifffile.imread(mask_path).astype(np.float32)
+                        mask_np /= mask_np.max()
+                        mask_tensor = torch.tensor(mask_np).unsqueeze(0).unsqueeze(0)
+                        stats = analyze_leaf_from_mask(mask_tensor, pixel_size_um=0.299)
+                        self.grouped_stats[group_name].append((leaf_id, stats))
+                        processed += 1
+                        self.progress.after(0, lambda p=processed/total_images: self.progress.set(p))
+                    except Exception as e:
+                        with open(log_file, "a") as log:
+                            log.write(f"Failed processing {mask_path}: {e}\n")
 
-                    # Load mask
-                    mask_np = tifffile.imread(mask_path).astype(np.float32)
-                    mask_np /= mask_np.max()  # normalize
-                    mask_tensor = torch.tensor(mask_np).unsqueeze(0).unsqueeze(0)
-
-                    # Analyze
-                    stats = analyze_leaf_from_mask(mask_tensor, pixel_size_um=0.299)
-
-                    # Generate report
-                    report_file = write_html_report(
-                        stats, leaf_id, outdir=folder,
-                        generate_csv=self.csv_var.get(),
-                        keep_svgs=self.keep_svgs_var.get(),
-                        log_file=log_file  # pass log
-                    )
-
-                    # Log success
-                    with open(log_file, "a") as log:
-                        log.write(f"Report successfully written: {report_file}\n")
-
-                except Exception as e:
-                    with open(log_file, "a") as log:
-                        log.write(f"Failed processing {mask_path}: {e}\n")
-
-                # Update progress
-                self.progress.after(0, lambda p=(i+1)/len(self.mask_paths): self.progress.set(p))
-
-            self.status.after(0, lambda: self.status.configure(
-                text="Reports generated!", text_color="green"
-            ))
-
+            # Generate batch/group HTML report
+            try:
+                report_file = write_group_html_report(
+                    self.grouped_stats,
+                    list(self.grouped_stats.keys()),
+                    folder,
+                    generate_csv=self.csv_var.get(),
+                    keep_svgs=self.keep_svgs_var.get(),
+                    log_file=log_file
+                )
+            except Exception as e:
+                with open(log_file, "a") as log:
+                    log.write(f"Failed generating batch report: {e}\n")
+                self.status.after(0, lambda: self.status.configure(
+                    text=f"Failed to generate reports. See log: {log_file}", text_color="red"
+                ))
+            else:
+                with open(log_file, "a") as log:
+                    log.write(f"Batch HTML report saved: {report_file}\n")
+                self.status.after(0, lambda: self.status.configure(
+                    text=f"Reports generated!", text_color="green"
+                ))
         finally:
             self.run_btn.after(0, lambda: self.run_btn.configure(state="normal"))
+
+    # ----------------- Load masks -----------------
+    def load_masks(self):
+        paths = filedialog.askopenfilenames(
+            filetypes=[("TIFF Images", "*.tif *.tiff"), ("PNG", "*.png")],
+            title="Select masks"
+        )
+        if not paths:
+            return
+
+        self.mask_paths = list(paths)
+
+        # Clear old ungrouped images, keep the "Ungrouped" header label
+        for p, lbl in list(self.ungrouped_images.items()):
+            lbl.destroy()
+        self.ungrouped_images.clear()
+
+        # Add each mask to ungrouped box
+        for p in self.mask_paths:
+            self.add_image_to_ungrouped(p)
+
+        total_images = len(self.mask_paths)
+        self.status.configure(
+            text=f"{total_images} images loaded in ungrouped box",
+            text_color="green"
+        )
+        self.run_btn.configure(state="normal")
+        self.progress.set(0)
+
+    # ----------------- Add ungrouped image -----------------
+    def add_image_to_ungrouped(self, image_path):
+        lbl = ctk.CTkLabel(
+            self.ungrouped_frame, text=os.path.basename(image_path),
+            fg_color="#555", corner_radius=5, width=150, height=25
+        )
+        lbl.pack(pady=2)
+        lbl.bind("<Button-1>", lambda e, l=lbl: self.start_drag(l, e))
+        lbl.bind("<B1-Motion>", lambda e, l=lbl: self.do_drag(l, e))
+        lbl.bind("<ButtonRelease-1>", lambda e, l=lbl: self.end_drag(l, e))
+        self.ungrouped_images[image_path] = lbl
+
+    # ----------------- Create new group -----------------
+    def create_new_group(self):
+        group_name = f"Group {len(self.group_widgets)+1}"
+        self.add_group_panel(group_name)
+
+    # ----------------- Add image to group -----------------
+    def add_image_to_group(self, image_path, group_name):
+        frame = self.add_group_panel(group_name)
+        img_label = ctk.CTkLabel(
+            frame.img_container, text=os.path.basename(image_path),
+            fg_color="#555", corner_radius=5, width=150, height=25
+        )
+        img_label.pack(pady=2)
+        img_label.bind("<Button-1>", lambda e, l=img_label: self.start_drag(l, e))
+        img_label.bind("<B1-Motion>", lambda e, l=img_label: self.do_drag(l, e))
+        img_label.bind("<ButtonRelease-1>", lambda e, l=img_label: self.end_drag(l, e))
+
+        if group_name not in self.grouped_masks:
+            self.grouped_masks[group_name] = []
+        self.grouped_masks[group_name].append(image_path)
+
+    # ----------------- Add group panel -----------------
+    def add_group_panel(self, group_name):
+        if group_name in self.group_widgets:
+            return self.group_widgets[group_name]
+
+        frame = ctk.CTkFrame(self.groups_frame, fg_color="#2D2D2D", corner_radius=10)
+        frame.pack(side="left", padx=10, pady=5, fill="y")
+
+        # Header with group label + rename/delete buttons
+        header_frame = ctk.CTkFrame(frame, fg_color="#3A3A3A")
+        header_frame.pack(fill="x", pady=5)
+        label = ctk.CTkLabel(header_frame, text=group_name, font=("Segoe UI", 14, "bold"))
+        label.pack(side="left", padx=5)
+
+        rename_btn = ctk.CTkButton(header_frame, text="Rename", width=60,
+                                   command=lambda f=frame: self.rename_group(f))
+        rename_btn.pack(side="left", padx=5)
+
+        delete_btn = ctk.CTkButton(header_frame, text="Delete", width=60,
+                                   command=lambda f=frame: self.delete_group(f))
+        delete_btn.pack(side="left", padx=5)
+
+        # Container for images
+        img_container = ctk.CTkFrame(frame, fg_color="#3A3A3A")
+        img_container.pack(fill="both", expand=True, padx=5, pady=(5,20))  # extra bottom padding
+        frame.img_container = img_container
+
+        self.group_widgets[group_name] = frame
+        self.grouped_masks[group_name] = []
+        return frame
+
+    # ----------------- Rename / Delete -----------------
+    def rename_group(self, frame):
+        old_name = frame.winfo_children()[0].winfo_children()[0].cget("text")
+        new_name = ctk.CTkInputDialog(text=f"Rename {old_name} to:", title="Rename Group").get_input()
+        if not new_name or new_name in self.group_widgets:
+            return
+
+        # Update dictionaries
+        self.group_widgets[new_name] = self.group_widgets.pop(old_name)
+        self.grouped_masks[new_name] = self.grouped_masks.pop(old_name)
+
+        # Update label text
+        frame.winfo_children()[0].winfo_children()[0].configure(text=new_name)
+
+    def delete_group(self, frame):
+        group_name = frame.winfo_children()[0].winfo_children()[0].cget("text")
+        # Move images back to ungrouped
+        for path in self.grouped_masks.get(group_name, []):
+            self.add_image_to_ungrouped(path)
+        self.grouped_masks.pop(group_name, None)
+        self.group_widgets.pop(group_name, None)
+        frame.destroy()
+
+    # ----------------- Drag & Drop -----------------
+    def start_drag(self, label, event):
+        label.lift()
+        self._drag_data = {"widget": label, "x": event.x_root, "y": event.y_root}
+
+    def do_drag(self, label, event):
+        dx = event.x_root - self._drag_data["x"]
+        dy = event.y_root - self._drag_data["y"]
+        x = label.winfo_x() + dx
+        y = label.winfo_y() + dy
+        label.place(x=x, y=y)
+        self._drag_data["x"] = event.x_root
+        self._drag_data["y"] = event.y_root
+
+    def end_drag(self, label, event):
+        x_root, y_root = event.x_root, event.y_root
+        dropped = False
+
+        # Get horizontal scroll offset of the canvas
+        scroll_offset = self.groups_canvas.xview()[0] * self.groups_frame.winfo_width()
+
+        for group_name, frame in self.group_widgets.items():
+            # Group frame position relative to screen, adjusted for scroll
+            fx = frame.winfo_rootx() - scroll_offset
+            fy = frame.winfo_rooty()
+            fw, fh = frame.winfo_width(), frame.winfo_height()
+
+            if fx <= x_root <= fx + fw and fy <= y_root <= fy + fh:
+                self.move_label_to_group(label, group_name)
+                dropped = True
+                break
+
+        if not dropped:
+            self.move_label_to_ungrouped(label)
+
+    def move_label_to_group(self, label, group_name):
+        self.remove_label_from_masks(label)
+        img_path = next(p for p in self.mask_paths if os.path.basename(p) == label.cget("text"))
+        label.destroy()
+        self.add_image_to_group(img_path, group_name)
+
+    def move_label_to_ungrouped(self, label):
+        self.remove_label_from_masks(label)
+        img_path = next(p for p in self.mask_paths if os.path.basename(p) == label.cget("text"))
+        label.destroy()
+        self.add_image_to_ungrouped(img_path)
+
+    def remove_label_from_masks(self, label):
+        name = label.cget("text")
+        for gname, lst in self.grouped_masks.items():
+            for p in lst:
+                if os.path.basename(p) == name:
+                    lst.remove(p)
+                    break
+        for p, l in list(self.ungrouped_images.items()):
+            if l == label:
+                del self.ungrouped_images[p]
+                break
+
 
 # -----------------------------
 # Feature extraction functions
@@ -587,10 +563,10 @@ def extract_features(mask, pixel_size_um=None):
         f = {}
         f['area_px'] = region.area
         f['perimeter_px'] = region.perimeter
-        f['major_axis'] = region.major_axis_length
-        f['minor_axis'] = region.minor_axis_length
-        f['aspect_ratio'] = (region.major_axis_length / region.minor_axis_length
-                             if region.minor_axis_length > 0 else np.nan)
+        f['major_axis'] = region.axis_major_length
+        f['minor_axis'] = region.axis_minor_length
+        f['aspect_ratio'] = (region.axis_major_length / region.axis_minor_length
+                            if region.axis_minor_length > 0 else np.nan)
         f['eccentricity'] = region.eccentricity
         f['orientation'] = region.orientation
         f['solidity'] = region.solidity
@@ -655,127 +631,6 @@ def analyze_leaf_from_mask(leaf_mask_tensor, pixel_size_um=0.299):
     }
 
     return stats_dict
-
-# -----------------------------
-# HTML report generation
-# -----------------------------
-# -----------------------------
-# HTML report generation (safe saving version)
-# -----------------------------
-def write_html_report(stats, leaf_id, outdir, generate_csv=True, keep_svgs=False, log_file=None):
-    """
-    Generates a self-contained HTML report embedding all SVG plots.
-    Optionally writes the raw CSV and keeps original SVGs.
-    Logs to a file if log_file is provided.
-    Returns the path of the saved report.
-    """
-    try:
-        os.makedirs(outdir, exist_ok=True)
-        df = stats["features_df"]
-        spatial = stats["spatial"]
-
-        # ------------------
-        # Save CSV if requested
-        # ------------------
-        csv_file_path = os.path.join(outdir, f"{leaf_id}_features.csv")
-        if generate_csv:
-            df.to_csv(csv_file_path, index=False)
-            csv_file_name = os.path.basename(csv_file_path)
-        else:
-            csv_file_name = None
-
-        # ------------------
-        # Generate plots (SVGs)
-        # ------------------
-        morph_plots = plot_morphology_boxplots_separate(df, outdir)
-
-        nn_boxplot_path = os.path.join(outdir, "nn_distance_boxplot.svg")
-        plot_nn_boxplot(spatial.get("nn_distances", np.array([])), nn_boxplot_path)
-
-        numeric_df = df.select_dtypes(include=np.number)
-        pca_plot_path = os.path.join(outdir, "morphospace_pca.svg")
-        plot_pca(numeric_df, pca_plot_path)
-
-        spatial_plot_path = os.path.join(outdir, "spatial_distribution.svg")
-        plot_spatial(df, spatial_plot_path)
-
-        area_shape_path = os.path.join(outdir, "area_vs_eccentricity.svg")
-        plot_area_vs_shape(df, "eccentricity", area_shape_path)
-
-        orientation_plot_path = None
-        if "orientation" in df.columns:
-            orientation_plot_path = os.path.join(outdir, "orientation_rose.svg")
-            plot_orientation_half_polar(df, orientation_plot_path)
-
-        qc_plot_path = os.path.join(outdir, "qc_plots.svg")
-        plot_qc(df, qc_plot_path)
-
-        # ------------------
-        # Embed SVGs
-        # ------------------
-        def embed_svg(svg_path):
-            if not svg_path or not os.path.exists(svg_path):
-                return ""
-            with open(svg_path, "r", encoding="utf-8") as f:
-                return f.read()
-
-        area_svg = embed_svg(morph_plots.get("area_um2"))
-        aspect_svg = embed_svg(morph_plots.get("aspect_ratio"))
-        ecc_svg = embed_svg(morph_plots.get("eccentricity"))
-        circ_svg = embed_svg(morph_plots.get("circularity"))
-
-        nn_svg = embed_svg(nn_boxplot_path)
-        pca_svg = embed_svg(pca_plot_path)
-        spatial_svg = embed_svg(spatial_plot_path)
-        area_shape_svg = embed_svg(area_shape_path)
-        orientation_svg = embed_svg(orientation_plot_path)
-        qc_svg = embed_svg(qc_plot_path)
-
-        # ------------------
-        # Render HTML
-        # ------------------
-        html = Template(HTML_TEMPLATE).render(
-            leaf_id=leaf_id,
-            **stats,
-            csv_file=csv_file_name,
-
-            area_boxplot=area_svg,
-            aspect_ratio_boxplot=aspect_svg,
-            eccentricity_boxplot=ecc_svg,
-            circularity_boxplot=circ_svg,
-
-            nn_boxplot=nn_svg,
-            pca_plot=pca_svg,
-            spatial_plot=spatial_svg,
-            area_shape=area_shape_svg,
-            orientation=orientation_svg,
-            qc_plot=qc_svg
-        )
-
-        report_file = os.path.join(outdir, f"{leaf_id}_report.html")
-        with open(report_file, "w", encoding="utf-8") as f:
-            f.write(html)
-
-        if log_file:
-            with open(log_file, "a") as log:
-                log.write(f"HTML report written to: {report_file}\n")
-
-        # ------------------
-        # Remove temporary SVGs if not keeping
-        # ------------------
-        if not keep_svgs:
-            for path in [*morph_plots.values(), nn_boxplot_path, pca_plot_path,
-                         spatial_plot_path, area_shape_path, qc_plot_path, orientation_plot_path]:
-                if path and os.path.exists(path):
-                    os.remove(path)
-
-        return report_file
-
-    except Exception as e:
-        if log_file:
-            with open(log_file, "a") as log:
-                log.write(f"Failed to write report for {leaf_id}: {e}\n")
-        raise
 
 
 
