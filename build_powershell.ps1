@@ -8,13 +8,12 @@ Remove-Item -Recurse -Force .\dist, .\build, .\app.spec -ErrorAction Ignore
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 # PyInstaller build
-pyinstaller app.py `
+.\.venv\Scripts\python.exe -m PyInstaller app.py `
     --name "StomaScope" `
     --icon "assets/stomaScope.ico" `
     --onefile `
     --noconsole `
     --clean `
-    --paths "C:/Users/erunyan/AppData/Local/Programs/Python/Python311" `
     --collect-submodules torch `
     --collect-data torch `
     --collect-data customtkinter `
@@ -27,4 +26,5 @@ pyinstaller app.py `
     --hidden-import=sklearn `
     --hidden-import=matplotlib.backends.backend_agg `
     --hidden-import=matplotlib.backends.backend_svg
+
 
