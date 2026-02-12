@@ -7,7 +7,7 @@ Remove-Item -Recurse -Force .\dist, .\build, .\app.spec -ErrorAction Ignore
 # PyInstaller build
 pyinstaller app.py `
     --name "stomaScope" `
-    --icon "assets/stomaScope.ico"
+    --icon "assets/stomaScope.ico" `
     --onedir `
     --noconsole `
     --clean `
