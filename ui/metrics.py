@@ -476,7 +476,6 @@ class MetricsTab:
                         outdir=folder,
                         generate_csv=gen_csv,
                         keep_svgs=keep_svg,
-                        log_file=log_file
                     )
                     
                     self.status.after(0, lambda: self.status.configure(
