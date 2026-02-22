@@ -592,4 +592,3 @@ class SegmentationTab:
     def _on_preview_resize(self, _):
         if self._current_preview_image:
             self._update_preview(*self._current_preview_image)
-

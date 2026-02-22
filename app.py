@@ -105,11 +105,19 @@ class StomataApp(ctk.CTk):
     def _check_for_updates(self):
         try:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            response = requests.get(url, timeout=5)
+            
+            # <-- Optional: add headers to request
+            headers = {"Accept": "application/vnd.github.v3+json"}
+            response = requests.get(url, headers=headers, timeout=5)
+            
             data = response.json()
 
+            if "tag_name" not in data:
+                print("No releases found or GitHub API returned an error:", data.get("message"))
+                return
+
             latest_version = data["tag_name"].lstrip("v")
-            download_url = data["html_url"]
+            download_url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases")
 
             if version.parse(latest_version) > version.parse(CURRENT_VERSION):
                 self.after(0, lambda: self._prompt_update(latest_version, download_url))

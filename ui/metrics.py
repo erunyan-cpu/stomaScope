@@ -1,6 +1,7 @@
 import os
 import threading
 from tkinter import filedialog
+from tkinter import simpledialog, messagebox
 
 import customtkinter as ctk
 import torch
@@ -171,382 +172,354 @@ mpl.rcParams.update({
     
 
 # -----------------------------
-# MetricsTab GUI
+# MetricsTab GUI (Refactored – No Drag & Drop)
 # -----------------------------
 class MetricsTab:
     def __init__(self, parent, app):
-        self.app = app
-        self.mask_paths = []
-        self.grouped_masks = {}       # dict[group_name] = list of mask paths
-        self.grouped_stats = {}       # dict[group_name] = list of (leaf_id, stats_dict)
-        self.ungrouped_images = {}    # dict[image_path] = label widget
-        self._drag_data = None
+        self.grouped_masks = {}
+        self.grouped_stats = {}
+        self.image_to_group = {}   # NEW
+        self.ungrouped_images = {}
         self.group_widgets = {}
+        self.selected_images = set()
 
         container = ctk.CTkFrame(parent, fg_color="#1E1E1E", corner_radius=15)
         container.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Title
-        self.title_label = ctk.CTkLabel(
+        ctk.CTkLabel(
             container, text="Stomata Metrics",
             font=("Segoe UI", 28, "bold"), text_color="white"
-        )
-        self.title_label.pack(anchor="n", pady=(10, 20))
+        ).pack(anchor="n", pady=(10, 20))
 
         # Description
         description = (
-            "Load binary masks and generate an HTML report for each sample.\n"
-            "Drag images into groups, rename or delete groups, then run."
+            "Load binary masks, assign them to groups, and generate reports.\n"
+            "Select images, choose a group, and click Move."
         )
-        self.desc_label = ctk.CTkLabel(
+        ctk.CTkLabel(
             container, text=description, font=("Segoe UI", 16),
             text_color="lightgray", wraplength=600, justify="center"
-        )
-        self.desc_label.pack(anchor="n", pady=(0, 20))
+        ).pack(anchor="n", pady=(0, 20))
 
-        # Buttons
+        # Buttons Frame
         buttons_frame = ctk.CTkFrame(container, fg_color="#2D2D2D")
         buttons_frame.pack(anchor="n", pady=(0, 20))
 
         self.load_btn = ctk.CTkButton(
-            buttons_frame, text="Load Mask(s)", font=("Segoe UI", 16, "bold"),
-            fg_color="#0078D7", hover_color="#005A9E", width=180, height=50,
-            corner_radius=12, command=self.load_masks
+            buttons_frame, text="Load Mask(s)",
+            command=self.load_masks
         )
         self.load_btn.pack(fill="x", pady=5)
 
         self.new_group_btn = ctk.CTkButton(
-            buttons_frame, text="New Group", command=self.create_new_group
+            buttons_frame, text="New Group",
+            command=self.create_new_group
         )
-        self.new_group_btn.pack(pady=5, fill="x")
+        self.new_group_btn.pack(fill="x", pady=5)
+
+        self.group_var = ctk.StringVar(value="")
+        self.group_dropdown = ctk.CTkOptionMenu(
+            buttons_frame,
+            values=[],
+            variable=self.group_var
+        )
+        self.group_dropdown.pack(fill="x", pady=5)
+
+        self.assign_btn = ctk.CTkButton(
+            buttons_frame,
+            text="Move Selected to Group",
+            command=self.assign_selected_to_group
+        )
+        self.assign_btn.pack(fill="x", pady=5)
 
         self.run_btn = ctk.CTkButton(
-            buttons_frame, text="Generate Report", font=("Segoe UI", 16, "bold"),
-            fg_color="#28A745", hover_color="#1E7E34", width=200, height=50,
-            corner_radius=12, state="disabled", command=self.run_metrics
+            buttons_frame,
+            text="Generate Report",
+            state="disabled",
+            command=self.run_metrics
         )
         self.run_btn.pack(fill="x", pady=5)
 
-        # Status and progress
+        self.new_group_btn.configure(state="disabled")
+        self.group_dropdown.configure(state="disabled")
+        self.assign_btn.configure(state="disabled")
+        self.run_btn.configure(state="disabled")
+
         self.status = ctk.CTkLabel(
             buttons_frame, text="Waiting for masks",
-            font=("Segoe UI", 14, "italic"), text_color="gray"
+            text_color="gray"
         )
-        self.status.pack(anchor="w", pady=(10,2))
+        self.status.pack(anchor="w", pady=(10, 2))
 
         self.progress = ctk.CTkProgressBar(buttons_frame, width=250)
         self.progress.set(0)
-        self.progress.pack(anchor="w", pady=(0,10))
+        self.progress.pack(anchor="w", pady=(0, 10))
 
-        # Options
-        self.csv_var = ctk.BooleanVar(value=False)
-        self.keep_svgs_var = ctk.BooleanVar(value=False)
-
-        ctk.CTkCheckBox(
-            buttons_frame, text="Generate raw data CSV",
-            variable=self.csv_var, font=("Segoe UI", 14)
-        ).pack(anchor="w", pady=2)
-
-        ctk.CTkCheckBox(
-            buttons_frame, text="Keep SVGs (debug / advanced)",
-            variable=self.keep_svgs_var, font=("Segoe UI", 14)
-        ).pack(anchor="w", pady=2)
-
-        # ----------------- Main area -----------------
+        # Main Area
         self.main_frame = ctk.CTkFrame(container, fg_color="#1E1E1E")
         self.main_frame.pack(fill="both", expand=True)
 
-        # Ungrouped box
+        # Ungrouped
         self.ungrouped_frame = ctk.CTkFrame(self.main_frame, fg_color="#2D2D2D", width=200)
         self.ungrouped_frame.pack(side="left", fill="y", padx=5, pady=5)
-        ctk.CTkLabel(self.ungrouped_frame, text="Ungrouped",
-                     font=("Segoe UI", 14, "bold")).pack(pady=5)
 
-        self.groups_container = ctk.CTkFrame(self.main_frame, fg_color="#1E1E1E")
-        self.groups_container.pack(side="right", fill="both", expand=True)
+        ctk.CTkLabel(
+            self.ungrouped_frame, text="Ungrouped",
+            font=("Segoe UI", 14, "bold")
+        ).pack(pady=5)
 
-        # Canvas for groups
-        self.groups_canvas = ctk.CTkCanvas(self.groups_container, bg="#1E1E1E", height=320)
-        self.groups_canvas.pack(side="top", fill="both", expand=True)
-
-        # Frame inside canvas to hold group panels
-        self.groups_frame = ctk.CTkFrame(self.groups_canvas, fg_color="#1E1E1E")
-        self.groups_canvas.create_window((0, 0), window=self.groups_frame, anchor="nw")
-
-        # Update scroll region when groups_frame changes
-        self.groups_frame.bind(
-            "<Configure>",
-            lambda e: self.groups_canvas.configure(scrollregion=self.groups_canvas.bbox("all"))
+        # Groups container
+        self.groups_scroll = ctk.CTkScrollableFrame(
+            self.main_frame,
+            fg_color="#1E1E1E",
+            orientation="horizontal"
         )
+        self.groups_scroll.pack(side="right", fill="both", expand=True)
 
-        # Horizontal scrollbar (linked to canvas)
-        self.h_scroll = ctk.CTkScrollbar(
-            self.groups_container,
-            orientation="horizontal",
-            command=self.groups_canvas.xview
+    # -----------------------------
+    # Load Masks
+    # -----------------------------
+    def load_masks(self):
+        paths = filedialog.askopenfilenames(
+            filetypes=[("TIFF Images", "*.tif *.tiff"), ("PNG", "*.png")]
         )
-        self.h_scroll.pack(side="bottom", fill="x", pady=(0,5))
-        self.groups_canvas.configure(xscrollcommand=self.h_scroll.set)
+        if not paths:
+            return
 
-        # Make group panels expand horizontally
-        self.groups_frame.bind(
-            "<Configure>",
-            lambda e: self.groups_canvas.configure(width=max(self.groups_canvas.winfo_width(), self.groups_frame.winfo_reqwidth()))
+        self.mask_paths = list(paths)
+        self.selected_images.clear()
+
+        # Clear old ungrouped
+        for lbl in self.ungrouped_images.values():
+            lbl.destroy()
+        self.ungrouped_images.clear()
+
+        # Reset groups
+        for frame in self.group_widgets.values():
+            frame.destroy()
+        self.group_widgets.clear()
+        self.grouped_masks.clear()
+        self.group_dropdown.configure(values=[])
+        self.group_var.set("")
+
+        for p in self.mask_paths:
+            self.add_image_to_ungrouped(p)
+
+        self.status.configure(
+            text=f"{len(self.mask_paths)} images loaded",
+            text_color="green"
         )
+        self.new_group_btn.configure(state="normal")
+        self.group_dropdown.configure(state="normal")
+        self.assign_btn.configure(state="normal")
+        self.run_btn.configure(state="normal")
+        self.progress.set(0)
 
-        # ----------------- Run metrics -----------------
+    # -----------------------------
+    # Add Image (Ungrouped)
+    # -----------------------------
+    def add_image_to_ungrouped(self, image_path):
+        lbl = ctk.CTkLabel(
+            self.ungrouped_frame,
+            text=os.path.basename(image_path),
+            fg_color="#555",
+            corner_radius=5,
+            width=150,
+            height=25
+        )
+        lbl.pack(pady=2)
+        lbl.bind("<Button-1>", lambda e, p=image_path: self.toggle_select(p))
+
+        self.ungrouped_images[image_path] = lbl
+
+    # -----------------------------
+    # Toggle Selection
+    # -----------------------------
+    def toggle_select(self, image_path):
+        if image_path in self.selected_images:
+            self.selected_images.remove(image_path)
+            self.ungrouped_images[image_path].configure(fg_color="#555")
+        else:
+            self.selected_images.add(image_path)
+            self.ungrouped_images[image_path].configure(fg_color="#28A745")
+
+    # -----------------------------
+    # Create Group
+    # -----------------------------
+    def create_new_group(self):
+        group_name = f"Group {len(self.group_widgets) + 1}"
+        frame = ctk.CTkFrame(self.groups_scroll, fg_color="#2D2D2D", corner_radius=10)
+        frame.pack(side="left", padx=10, pady=5, fill="y")
+
+        header_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        header_frame.pack(fill="x", pady=5)
+
+        header = ctk.CTkLabel(
+            header_frame,
+            text=group_name,
+            font=("Segoe UI", 14, "bold")
+        )
+        header.pack(side="left", padx=5)
+
+        rename_btn = ctk.CTkButton(
+            header_frame,
+            text="✎",
+            width=30,
+            command=lambda g=group_name: self.rename_group(g)
+        )
+        rename_btn.pack(side="right", padx=2)
+
+        delete_btn = ctk.CTkButton(
+            header_frame,
+            text="🗑",
+            width=30,
+            fg_color="#8B0000",
+            hover_color="#A00000",
+            command=lambda g=group_name: self.delete_group(g)
+        )
+        delete_btn.pack(side="right", padx=2)
+
+        img_container = ctk.CTkScrollableFrame(
+            frame,
+            fg_color="#3A3A3A",
+            orientation="vertical"
+        )
+        img_container.pack(fill="both", expand=True, padx=5, pady=5)
+
+        frame.img_container = img_container
+        self.group_widgets[group_name] = frame
+        self.grouped_masks[group_name] = []
+
+        # Update dropdown
+        self.group_dropdown.configure(values=list(self.group_widgets.keys()))
+        self.group_var.set(group_name)
+
+
+    # -----------------------------
+    # Rename a group safely
+    # -----------------------------
+    def rename_group(self, old_name):
+        # Ask for new name
+        new_name = ctk.CTkInputDialog(
+            text=f"Rename '{old_name}' to:",
+            title="Rename Group"
+        ).get_input()
+        
+        # Validate
+        if not new_name or new_name in self.group_widgets:
+            return
+
+        # Update internal dictionaries
+        self.group_widgets[new_name] = self.group_widgets.pop(old_name)
+        self.grouped_masks[new_name] = self.grouped_masks.pop(old_name)
+
+        # Update dropdown
+        values = list(self.group_widgets.keys())
+        self.group_dropdown.configure(values=values)
+        self.group_var.set(new_name)
+
+        # Update UI label
+        frame = self.group_widgets[new_name]
+        header_label = frame.winfo_children()[0]      # header frame
+        label = header_label.winfo_children()[0]      # actual label
+        label.configure(text=new_name)
+
+
+    # -----------------------------
+    # Delete a group safely
+    # -----------------------------
+    def delete_group(self, group_name):
+        if group_name not in self.group_widgets:
+            return
+
+        frame = self.group_widgets.pop(group_name)
+        mask_list = self.grouped_masks.pop(group_name, [])
+
+        # Move masks back to ungrouped
+        for mask_path in mask_list:
+            self.add_image_to_ungrouped(mask_path)
+
+        # Destroy frame
+        frame.destroy()
+
+        # Update dropdown
+        values = list(self.group_widgets.keys())
+        self.group_dropdown.configure(values=values)
+        if values:
+            self.group_var.set(values[0])
+        else:
+            self.group_var.set("")
+
+
+    # -----------------------------
+    # Assign Selected
+    # -----------------------------
+    def assign_selected_to_group(self):
+        group_name = self.group_var.get()
+        if not group_name:
+            return
+
+        for image_path in list(self.selected_images):
+
+            # --- Remove from previous group (O(1)) ---
+            old_group = self.image_to_group.get(image_path)
+            if old_group and image_path in self.grouped_masks.get(old_group, []):
+                self.grouped_masks[old_group].remove(image_path)
+
+            # --- Update mapping ---
+            self.image_to_group[image_path] = group_name
+
+            # --- Add to new group if not already there ---
+            if image_path not in self.grouped_masks[group_name]:
+                self.grouped_masks[group_name].append(image_path)
+
+            # --- Remove from ungrouped UI if present ---
+            if image_path in self.ungrouped_images:
+                self.ungrouped_images[image_path].destroy()
+                del self.ungrouped_images[image_path]
+
+            # --- Add UI label to group ---
+            self.add_image_to_group(image_path, group_name)
+
+        self.selected_images.clear()
+
+    def add_image_to_group(self, image_path, group_name):
+        frame = self.group_widgets[group_name]
+
+        # Remove existing UI label if it exists anywhere
+        for g in self.group_widgets.values():
+            for widget in g.img_container.winfo_children():
+                if widget.cget("text") == os.path.basename(image_path):
+                    widget.destroy()
+
+        lbl = ctk.CTkLabel(
+            frame.img_container,
+            text=os.path.basename(image_path),
+            fg_color="#555",
+            corner_radius=5,
+            width=150,
+            height=25
+        )
+        lbl.pack(pady=2)
+
+        lbl.bind("<Button-1>", lambda e, p=image_path: self.toggle_select_grouped(p, lbl))
+
+    def toggle_select_grouped(self, image_path, label_widget):
+        if image_path in self.selected_images:
+            self.selected_images.remove(image_path)
+            label_widget.configure(fg_color="#555")
+        else:
+            self.selected_images.add(image_path)
+            label_widget.configure(fg_color="#28A745")
+
     def run_metrics(self):
         if not self.grouped_masks:
             return
 
         self.run_btn.configure(state="disabled")
         self.status.configure(text="Generating reports...", text_color="orange")
-        self.progress.set(0)
-
         threading.Thread(target=self._metrics_thread, daemon=True).start()
-
-    # ----------------- Background thread -----------------
-    def _metrics_thread(self):
-        from .html_reporting import write_group_html_report
-        try:
-            folder = filedialog.askdirectory(
-                initialdir=os.path.join(os.path.expanduser("~"), "Desktop"),
-                title="Select folder to save reports"
-            )
-            if not folder:
-                self.run_btn.after(0, lambda: self.run_btn.configure(state="normal"))
-                self.status.after(0, lambda: self.status.configure(
-                    text="No folder selected, cancelled.", text_color="red"
-                ))
-                return
-
-            # Normalize grouped_masks if empty
-            if not self.grouped_masks:
-                self.grouped_masks = {os.path.splitext(p)[0]: [p] for p in self.mask_paths}
-
-            self.grouped_stats = {}
-            total_images = sum(len(v) for v in self.grouped_masks.values())
-            processed = 0
-
-            log_file = os.path.join(folder, "report_log.txt")
-            with open(log_file, "a") as log:
-                log.write("Starting report generation...\n")
-
-            # Compute stats
-            for group_name, paths in self.grouped_masks.items():
-                self.grouped_stats[group_name] = []
-                for mask_path in paths:
-                    leaf_id = os.path.splitext(os.path.basename(mask_path))[0]
-                    try:
-                        mask_np = tifffile.imread(mask_path).astype(np.float32)
-                        mask_np /= mask_np.max()
-                        mask_tensor = torch.tensor(mask_np).unsqueeze(0).unsqueeze(0)
-                        stats = analyze_leaf_from_mask(mask_tensor, pixel_size_um=0.299)
-                        self.grouped_stats[group_name].append((leaf_id, stats))
-                        processed += 1
-                        self.progress.after(0, lambda p=processed/total_images: self.progress.set(p))
-                    except Exception as e:
-                        with open(log_file, "a") as log:
-                            log.write(f"Failed processing {mask_path}: {e}\n")
-
-            # Generate batch/group HTML report
-            try:
-                report_file = write_group_html_report(
-                    self.grouped_stats,
-                    list(self.grouped_stats.keys()),
-                    folder,
-                    generate_csv=self.csv_var.get(),
-                    keep_svgs=self.keep_svgs_var.get(),
-                    log_file=log_file
-                )
-            except Exception as e:
-                with open(log_file, "a") as log:
-                    log.write(f"Failed generating batch report: {e}\n")
-                self.status.after(0, lambda: self.status.configure(
-                    text=f"Failed to generate reports. See log: {log_file}", text_color="red"
-                ))
-            else:
-                with open(log_file, "a") as log:
-                    log.write(f"Batch HTML report saved: {report_file}\n")
-                self.status.after(0, lambda: self.status.configure(
-                    text=f"Reports generated!", text_color="green"
-                ))
-        finally:
-            self.run_btn.after(0, lambda: self.run_btn.configure(state="normal"))
-
-    # ----------------- Load masks -----------------
-    def load_masks(self):
-        paths = filedialog.askopenfilenames(
-            filetypes=[("TIFF Images", "*.tif *.tiff"), ("PNG", "*.png")],
-            title="Select masks"
-        )
-        if not paths:
-            return
-
-        self.mask_paths = list(paths)
-
-        # Clear old ungrouped images, keep the "Ungrouped" header label
-        for p, lbl in list(self.ungrouped_images.items()):
-            lbl.destroy()
-        self.ungrouped_images.clear()
-
-        # Add each mask to ungrouped box
-        for p in self.mask_paths:
-            self.add_image_to_ungrouped(p)
-
-        total_images = len(self.mask_paths)
-        self.status.configure(
-            text=f"{total_images} images loaded in ungrouped box",
-            text_color="green"
-        )
-        self.run_btn.configure(state="normal")
-        self.progress.set(0)
-
-    # ----------------- Add ungrouped image -----------------
-    def add_image_to_ungrouped(self, image_path):
-        lbl = ctk.CTkLabel(
-            self.ungrouped_frame, text=os.path.basename(image_path),
-            fg_color="#555", corner_radius=5, width=150, height=25
-        )
-        lbl.pack(pady=2)
-        lbl.bind("<Button-1>", lambda e, l=lbl: self.start_drag(l, e))
-        lbl.bind("<B1-Motion>", lambda e, l=lbl: self.do_drag(l, e))
-        lbl.bind("<ButtonRelease-1>", lambda e, l=lbl: self.end_drag(l, e))
-        self.ungrouped_images[image_path] = lbl
-
-    # ----------------- Create new group -----------------
-    def create_new_group(self):
-        group_name = f"Group {len(self.group_widgets)+1}"
-        self.add_group_panel(group_name)
-
-    # ----------------- Add image to group -----------------
-    def add_image_to_group(self, image_path, group_name):
-        frame = self.add_group_panel(group_name)
-        img_label = ctk.CTkLabel(
-            frame.img_container, text=os.path.basename(image_path),
-            fg_color="#555", corner_radius=5, width=150, height=25
-        )
-        img_label.pack(pady=2)
-        img_label.bind("<Button-1>", lambda e, l=img_label: self.start_drag(l, e))
-        img_label.bind("<B1-Motion>", lambda e, l=img_label: self.do_drag(l, e))
-        img_label.bind("<ButtonRelease-1>", lambda e, l=img_label: self.end_drag(l, e))
-
-        if group_name not in self.grouped_masks:
-            self.grouped_masks[group_name] = []
-        self.grouped_masks[group_name].append(image_path)
-
-    # ----------------- Add group panel -----------------
-    def add_group_panel(self, group_name):
-        if group_name in self.group_widgets:
-            return self.group_widgets[group_name]
-
-        frame = ctk.CTkFrame(self.groups_frame, fg_color="#2D2D2D", corner_radius=10)
-        frame.pack(side="left", padx=10, pady=5, fill="y")
-
-        # Header with group label + rename/delete buttons
-        header_frame = ctk.CTkFrame(frame, fg_color="#3A3A3A")
-        header_frame.pack(fill="x", pady=5)
-        label = ctk.CTkLabel(header_frame, text=group_name, font=("Segoe UI", 14, "bold"))
-        label.pack(side="left", padx=5)
-
-        rename_btn = ctk.CTkButton(header_frame, text="Rename", width=60,
-                                   command=lambda f=frame: self.rename_group(f))
-        rename_btn.pack(side="left", padx=5)
-
-        delete_btn = ctk.CTkButton(header_frame, text="Delete", width=60,
-                                   command=lambda f=frame: self.delete_group(f))
-        delete_btn.pack(side="left", padx=5)
-
-        # Container for images
-        img_container = ctk.CTkFrame(frame, fg_color="#3A3A3A")
-        img_container.pack(fill="both", expand=True, padx=5, pady=(5,20))  # extra bottom padding
-        frame.img_container = img_container
-
-        self.group_widgets[group_name] = frame
-        self.grouped_masks[group_name] = []
-        return frame
-
-    # ----------------- Rename / Delete -----------------
-    def rename_group(self, frame):
-        old_name = frame.winfo_children()[0].winfo_children()[0].cget("text")
-        new_name = ctk.CTkInputDialog(text=f"Rename {old_name} to:", title="Rename Group").get_input()
-        if not new_name or new_name in self.group_widgets:
-            return
-
-        # Update dictionaries
-        self.group_widgets[new_name] = self.group_widgets.pop(old_name)
-        self.grouped_masks[new_name] = self.grouped_masks.pop(old_name)
-
-        # Update label text
-        frame.winfo_children()[0].winfo_children()[0].configure(text=new_name)
-
-    def delete_group(self, frame):
-        group_name = frame.winfo_children()[0].winfo_children()[0].cget("text")
-        # Move images back to ungrouped
-        for path in self.grouped_masks.get(group_name, []):
-            self.add_image_to_ungrouped(path)
-        self.grouped_masks.pop(group_name, None)
-        self.group_widgets.pop(group_name, None)
-        frame.destroy()
-
-    # ----------------- Drag & Drop -----------------
-    def start_drag(self, label, event):
-        label.lift()
-        self._drag_data = {"widget": label, "x": event.x_root, "y": event.y_root}
-
-    def do_drag(self, label, event):
-        dx = event.x_root - self._drag_data["x"]
-        dy = event.y_root - self._drag_data["y"]
-        x = label.winfo_x() + dx
-        y = label.winfo_y() + dy
-        label.place(x=x, y=y)
-        self._drag_data["x"] = event.x_root
-        self._drag_data["y"] = event.y_root
-
-    def end_drag(self, label, event):
-        x_root, y_root = event.x_root, event.y_root
-        dropped = False
-
-        # Get horizontal scroll offset of the canvas
-        scroll_offset = self.groups_canvas.xview()[0] * self.groups_frame.winfo_width()
-
-        for group_name, frame in self.group_widgets.items():
-            # Group frame position relative to screen, adjusted for scroll
-            fx = frame.winfo_rootx() - scroll_offset
-            fy = frame.winfo_rooty()
-            fw, fh = frame.winfo_width(), frame.winfo_height()
-
-            if fx <= x_root <= fx + fw and fy <= y_root <= fy + fh:
-                self.move_label_to_group(label, group_name)
-                dropped = True
-                break
-
-        if not dropped:
-            self.move_label_to_ungrouped(label)
-
-    def move_label_to_group(self, label, group_name):
-        self.remove_label_from_masks(label)
-        img_path = next(p for p in self.mask_paths if os.path.basename(p) == label.cget("text"))
-        label.destroy()
-        self.add_image_to_group(img_path, group_name)
-
-    def move_label_to_ungrouped(self, label):
-        self.remove_label_from_masks(label)
-        img_path = next(p for p in self.mask_paths if os.path.basename(p) == label.cget("text"))
-        label.destroy()
-        self.add_image_to_ungrouped(img_path)
-
-    def remove_label_from_masks(self, label):
-        name = label.cget("text")
-        for gname, lst in self.grouped_masks.items():
-            for p in lst:
-                if os.path.basename(p) == name:
-                    lst.remove(p)
-                    break
-        for p, l in list(self.ungrouped_images.items()):
-            if l == label:
-                del self.ungrouped_images[p]
-                break
 
 
 # -----------------------------
