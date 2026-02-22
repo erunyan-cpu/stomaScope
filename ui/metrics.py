@@ -15,145 +15,16 @@ import matplotlib
 matplotlib.use("Agg") 
 import matplotlib.pyplot as plt
 from jinja2 import Template
-from ui.html_reporting import write_html_report, write_group_html_report
-
-def plot_qc(df, outpath):
-    fig, axs = plt.subplots(1, 2, figsize=(4, 3))
-
-    axs[0].scatter(df["area_px"], df["solidity"], s=10, alpha=0.7)
-    axs[0].set_xlabel("Area (px)")
-    axs[0].set_ylabel("Solidity")
-    axs[0].set_title("Area vs Solidity", fontsize=10)
-
-    axs[1].scatter(df["perimeter_px"], df["circularity"], s=10, alpha=0.7)
-    axs[1].set_xlabel("Perimeter (px)")
-    axs[1].set_ylabel("Circularity")
-    axs[1].set_title("Perimeter vs Circularity", fontsize=10)
-
-    for ax in axs:
-        ax.tick_params(labelsize=8)
-
-    fig.tight_layout(pad=1.0)
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-def plot_orientation_half_polar(df, outpath):
-    """
-    Semi-polar (half-radar) plot of stomatal major-axis orientations
-    relative to the dominant orientation (0°).
-    """
-    if "orientation" not in df.columns:
-        return
-
-    theta = df["orientation"].dropna().values
-    theta = np.mod(theta, np.pi)
-
-    # Dominant orientation via histogram peak
-    hist, bin_edges = np.histogram(theta, bins=180, range=(0, np.pi))
-    dominant = bin_edges[np.argmax(hist)]
-
-    # Relative angles in [-π/2, +π/2]
-    rel = theta - dominant
-    rel = (rel + np.pi/2) % np.pi - np.pi/2
-
-    fig = plt.figure(figsize=(4, 3))
-    ax = fig.add_subplot(111, polar=True)
-
-    counts, _, _ = ax.hist(
-        rel,
-        bins=36,
-        range=(-np.pi/2, np.pi/2)
-    )
-
-    # Polar formatting
-    ax.set_theta_zero_location("N")
-    ax.set_theta_direction(-1)
-    ax.set_thetamin(-90)
-    ax.set_thetamax(90)
-
-    # Radial ticks: integers only, no clutter
-    max_count = int(max(counts))
-    ticks = np.linspace(0, max_count, 4, dtype=int)
-    ax.set_rticks(ticks)
-    ax.set_yticklabels([str(t) for t in ticks])
-    ax.tick_params(axis="y", labelsize=8)
-
-    ax.set_title(
-        "Stomatal Orientation (Relative)",
-        pad=12
-    )
-
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-def plot_area_vs_shape(df, shape_col, outpath):
-    fig, ax = plt.subplots(figsize=(4, 3))
-    ax.scatter(df["area_um2"], df[shape_col], s=15, alpha=0.7)
-    ax.set_xlabel("Area (µm²)")
-    ax.set_ylabel(shape_col.replace("_", " ").title())
-    ax.set_title(f"Area vs {shape_col.replace('_',' ').title()}")
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-def plot_spatial(df, outpath):
-    fig, ax = plt.subplots(figsize=(4, 4))
-    ax.scatter(df["centroid_x_um"], df["centroid_y_um"], s=15)
-    ax.set_aspect("equal")
-    ax.set_xlabel("X (µm)")
-    ax.set_ylabel("Y (µm)")
-    ax.set_title("Spatial Distribution of Stomata")
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-from sklearn.decomposition import PCA
-
-def plot_pca(df_numeric, outpath):
-    X = (df_numeric - df_numeric.mean()) / (df_numeric.std() + 1e-6)
-    pca = PCA(n_components=2)
-    pcs = pca.fit_transform(X)
-
-    fig, ax = plt.subplots(figsize=(4, 4))
-    ax.scatter(pcs[:,0], pcs[:,1], s=18, alpha=0.7)
-    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}%)")
-    ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}%)")
-    ax.set_title("Morphospace (PCA)")
-    ax.axhline(0, lw=0.5)
-    ax.axvline(0, lw=0.5)
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-def plot_histogram(df, col, xlabel, outpath):
-    fig, ax = plt.subplots(figsize=(4, 3))
-    ax.hist(df[col].dropna(), bins=30)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Count")
-    ax.set_title(col.replace("_", " ").title())
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
-
-def plot_morphology_boxplots_separate(df, outdir):
-    plots = {}
-    for col in ["area_um2", "aspect_ratio", "eccentricity", "circularity"]:
-        if col in df.columns:
-            path = os.path.join(outdir, f"{col}_boxplot.svg")
-            plot_histogram(df, col, xlabel=col.replace("_", " ").title(), outpath=path)
-            plots[col] = path
-    return plots
-
-def plot_nn_boxplot(nn_distances, outpath):
-    fig, ax = plt.subplots(figsize=(4, 3))
-    if len(nn_distances) > 0:
-        ax.boxplot(nn_distances)
-    ax.set_ylabel("NN Distance (µm)")
-    ax.set_title("Nearest Neighbor Distances")
-    fig.tight_layout()
-    fig.savefig(outpath, format="svg")
-    plt.close(fig)
+import os
+import threading
+import numpy as np
+import pandas as pd
+import torch
+import tifffile
+from tkinter import filedialog
+import customtkinter as ctk
+from skimage.measure import label, regionprops
+from scipy.spatial import KDTree
 
 
 import matplotlib as mpl
@@ -178,9 +49,9 @@ class MetricsTab:
     def __init__(self, parent, app):
         self.grouped_masks = {}
         self.grouped_stats = {}
-        self.image_to_group = {}   # NEW
-        self.ungrouped_images = {}
-        self.group_widgets = {}
+        self.image_to_group = {}   
+        self.ungrouped_images = {} 
+        self.group_widgets = {} 
         self.selected_images = set()
 
         container = ctk.CTkFrame(parent, fg_color="#1E1E1E", corner_radius=15)
@@ -337,12 +208,24 @@ class MetricsTab:
     # Toggle Selection
     # -----------------------------
     def toggle_select(self, image_path):
-        if image_path in self.selected_images:
-            self.selected_images.remove(image_path)
-            self.ungrouped_images[image_path].configure(fg_color="#555")
-        else:
-            self.selected_images.add(image_path)
-            self.ungrouped_images[image_path].configure(fg_color="#28A745")
+            """Standardized toggle for both ungrouped and grouped images."""
+            if image_path in self.selected_images:
+                self.selected_images.remove(image_path)
+                color = "#555"
+            else:
+                self.selected_images.add(image_path)
+                color = "#28A745"
+                
+            # Update color in ungrouped UI if it exists
+            if image_path in self.ungrouped_images:
+                self.ungrouped_images[image_path].configure(fg_color=color)
+            
+            # Update color in any group UI it might be in
+            for group_name, frame in self.group_widgets.items():
+                for widget in frame.img_container.winfo_children():
+                    # We store the path in a custom attribute or check text (less ideal but works)
+                    if getattr(widget, 'image_path', None) == image_path:
+                        widget.configure(fg_color=color)
 
     # -----------------------------
     # Create Group
@@ -400,110 +283,94 @@ class MetricsTab:
     # Rename a group safely
     # -----------------------------
     def rename_group(self, old_name):
-        # Ask for new name
-        new_name = ctk.CTkInputDialog(
-            text=f"Rename '{old_name}' to:",
-            title="Rename Group"
-        ).get_input()
-        
-        # Validate
-        if not new_name or new_name in self.group_widgets:
-            return
+            new_name = ctk.CTkInputDialog(text=f"Rename '{old_name}':", title="Rename").get_input()
+            if not new_name or new_name in self.group_widgets:
+                return
 
-        # Update internal dictionaries
-        self.group_widgets[new_name] = self.group_widgets.pop(old_name)
-        self.grouped_masks[new_name] = self.grouped_masks.pop(old_name)
+            # 1. Sync Dictionaries
+            self.group_widgets[new_name] = self.group_widgets.pop(old_name)
+            self.grouped_masks[new_name] = self.grouped_masks.pop(old_name)
 
-        # Update dropdown
-        values = list(self.group_widgets.keys())
-        self.group_dropdown.configure(values=values)
-        self.group_var.set(new_name)
+            # 2. CRITICAL: Update the image_to_group mapping
+            for path, group in self.image_to_group.items():
+                if group == old_name:
+                    self.image_to_group[path] = new_name
 
-        # Update UI label
-        frame = self.group_widgets[new_name]
-        header_label = frame.winfo_children()[0]      # header frame
-        label = header_label.winfo_children()[0]      # actual label
-        label.configure(text=new_name)
+            # 3. Update Dropdown and UI Label
+            self.group_dropdown.configure(values=list(self.group_widgets.keys()))
+            self.group_var.set(new_name)
+            
+            frame = self.group_widgets[new_name]
+            header_label = frame.winfo_children()[0].winfo_children()[0]
+            header_label.configure(text=new_name)
 
 
     # -----------------------------
     # Delete a group safely
     # -----------------------------
     def delete_group(self, group_name):
-        if group_name not in self.group_widgets:
-            return
+            if group_name not in self.group_widgets: return
+            
+            frame = self.group_widgets.pop(group_name)
+            mask_list = self.grouped_masks.pop(group_name, [])
 
-        frame = self.group_widgets.pop(group_name)
-        mask_list = self.grouped_masks.pop(group_name, [])
+            for mask_path in mask_list:
+                # Remove from mapping and move back to UI
+                if mask_path in self.image_to_group:
+                    del self.image_to_group[mask_path]
+                self.add_image_to_ungrouped(mask_path)
 
-        # Move masks back to ungrouped
-        for mask_path in mask_list:
-            self.add_image_to_ungrouped(mask_path)
-
-        # Destroy frame
-        frame.destroy()
-
-        # Update dropdown
-        values = list(self.group_widgets.keys())
-        self.group_dropdown.configure(values=values)
-        if values:
-            self.group_var.set(values[0])
-        else:
-            self.group_var.set("")
+            frame.destroy()
+            values = list(self.group_widgets.keys())
+            self.group_dropdown.configure(values=values)
+            self.group_var.set(values[0] if values else "")
 
 
     # -----------------------------
     # Assign Selected
     # -----------------------------
     def assign_selected_to_group(self):
-        group_name = self.group_var.get()
-        if not group_name:
-            return
+            group_name = self.group_var.get()
+            if not group_name or not self.selected_images: return
 
-        for image_path in list(self.selected_images):
+            for image_path in list(self.selected_images):
+                # Remove from old group list
+                old_group = self.image_to_group.get(image_path)
+                if old_group and old_group in self.grouped_masks:
+                    if image_path in self.grouped_masks[old_group]:
+                        self.grouped_masks[old_group].remove(image_path)
 
-            # --- Remove from previous group (O(1)) ---
-            old_group = self.image_to_group.get(image_path)
-            if old_group and image_path in self.grouped_masks.get(old_group, []):
-                self.grouped_masks[old_group].remove(image_path)
+                # Update mapping
+                self.image_to_group[image_path] = group_name
+                if image_path not in self.grouped_masks[group_name]:
+                    self.grouped_masks[group_name].append(image_path)
 
-            # --- Update mapping ---
-            self.image_to_group[image_path] = group_name
+                # UI Migration
+                if image_path in self.ungrouped_images:
+                    self.ungrouped_images[image_path].destroy()
+                    del self.ungrouped_images[image_path]
 
-            # --- Add to new group if not already there ---
-            if image_path not in self.grouped_masks[group_name]:
-                self.grouped_masks[group_name].append(image_path)
+                self.add_image_to_group_ui(image_path, group_name)
 
-            # --- Remove from ungrouped UI if present ---
-            if image_path in self.ungrouped_images:
-                self.ungrouped_images[image_path].destroy()
-                del self.ungrouped_images[image_path]
+            self.selected_images.clear()
 
-            # --- Add UI label to group ---
-            self.add_image_to_group(image_path, group_name)
+    def add_image_to_group_ui(self, image_path, group_name):
+            frame = self.group_widgets[group_name]
+            
+            # Clean up any duplicate labels of this image in other groups
+            for g_frame in self.group_widgets.values():
+                for widget in g_frame.img_container.winfo_children():
+                    if getattr(widget, 'image_path', None) == image_path:
+                        widget.destroy()
 
-        self.selected_images.clear()
-
-    def add_image_to_group(self, image_path, group_name):
-        frame = self.group_widgets[group_name]
-
-        # Remove existing UI label if it exists anywhere
-        for g in self.group_widgets.values():
-            for widget in g.img_container.winfo_children():
-                if widget.cget("text") == os.path.basename(image_path):
-                    widget.destroy()
-
-        lbl = ctk.CTkLabel(
-            frame.img_container,
-            text=os.path.basename(image_path),
-            fg_color="#555",
-            corner_radius=5,
-            width=150,
-            height=25
-        )
-        lbl.pack(pady=2)
-
-        lbl.bind("<Button-1>", lambda e, p=image_path: self.toggle_select_grouped(p, lbl))
+            lbl = ctk.CTkLabel(
+                frame.img_container,
+                text=os.path.basename(image_path),
+                fg_color="#555", corner_radius=5, width=150, height=25
+            )
+            lbl.image_path = image_path # Tag it for easy finding later
+            lbl.pack(pady=2)
+            lbl.bind("<Button-1>", lambda e, p=image_path: self.toggle_select(p))
 
     def toggle_select_grouped(self, image_path, label_widget):
         if image_path in self.selected_images:
@@ -521,44 +388,143 @@ class MetricsTab:
         self.status.configure(text="Generating reports...", text_color="orange")
         threading.Thread(target=self._metrics_thread, daemon=True).start()
 
+    # -----------------------------
+    # Metrics processing thread
+    # -----------------------------
+    def _metrics_thread(self):
+            """
+            Threaded function to process masks, compute statistics, and generate 
+            a group-aware HTML report while preserving user-defined groupings.
+            """
+            from .html_reporting import write_html_report
+            import os
+            import tifffile
+            import torch
+            from tkinter import filedialog
 
-# -----------------------------
-# Feature extraction functions
-# -----------------------------
-def extract_features(mask, pixel_size_um=None):
-    labeled_mask = label(mask)
-    features_list = []
-    MIN_AREA_PX = 20
+            try:
+                # 1. Select output folder
+                desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+                folder = filedialog.askdirectory(
+                    initialdir=desktop,
+                    title="Select folder to save reports"
+                )
+                if not folder:
+                    return
 
-    for region in regionprops(labeled_mask):
-        if region.area < MIN_AREA_PX:
-            continue
-        f = {}
-        f['area_px'] = region.area
-        f['perimeter_px'] = region.perimeter
-        f['major_axis'] = region.axis_major_length
-        f['minor_axis'] = region.axis_minor_length
-        f['aspect_ratio'] = (region.axis_major_length / region.axis_minor_length
-                            if region.axis_minor_length > 0 else np.nan)
-        f['eccentricity'] = region.eccentricity
-        f['orientation'] = region.orientation
-        f['solidity'] = region.solidity
-        f['circularity'] = (4*np.pi*region.area/(region.perimeter**2)
-                            if region.perimeter > 0 else np.nan)
-        f['contour_complexity'] = (region.perimeter / (2*np.sqrt(np.pi*region.area))
-                                   if region.area > 0 else np.nan)
-        f['centroid_y'], f['centroid_x'] = region.centroid
+                # 2. Prepare dynamic grouping data
+                # We combine explicit grouped_masks with any remaining ungrouped images
+                processing_queue = self.grouped_masks.copy()
+                
+                # Find images that aren't in any group and put them in a default category
+                ungrouped_list = [p for p in self.mask_paths if p not in self.image_to_group]
+                if ungrouped_list:
+                    processing_queue["Ungrouped"] = ungrouped_list
 
-        if pixel_size_um is not None:
-            f['centroid_x_um'] = f['centroid_x'] * pixel_size_um
-            f['centroid_y_um'] = f['centroid_y'] * pixel_size_um
-            f['area_um2'] = f['area_px'] * (pixel_size_um ** 2)
-            f['perimeter_um'] = f['perimeter_px'] * pixel_size_um
-            f['major_axis_um'] = f['major_axis'] * pixel_size_um
-            f['minor_axis_um'] = f['minor_axis'] * pixel_size_um
+                total_images = sum(len(v) for v in processing_queue.values())
+                if total_images == 0:
+                    self.status.after(0, lambda: self.status.configure(
+                        text="No images to process", text_color="red"
+                    ))
+                    return
 
-        features_list.append(f)
-    return features_list
+                # 3. Prepare log file
+                log_file = os.path.join(folder, "report_log.txt")
+                with open(log_file, "a") as log:
+                    log.write(f"\n--- Starting Batch Report: {total_images} images ---\n")
+
+                # 4. Process masks and compute stats
+                self.grouped_stats = {}
+                processed_count = 0
+
+                for group_name, paths in processing_queue.items():
+                    self.grouped_stats[group_name] = []
+                    
+                    for mask_path in paths:
+                        leaf_id = os.path.splitext(os.path.basename(mask_path))[0]
+                        try:
+                            # Load and Normalize
+                            mask_np = tifffile.imread(mask_path).astype(np.float32)
+                            # Avoid division by zero on empty masks
+                            max_val = mask_np.max()
+                            if max_val > 0:
+                                mask_np /= max_val
+                            
+                            mask_tensor = torch.tensor(mask_np).unsqueeze(0).unsqueeze(0)
+
+                            # Compute stats (calling the standalone function)
+                            stats = analyze_leaf_from_mask(mask_tensor, pixel_size_um=0.299)
+                            self.grouped_stats[group_name].append((leaf_id, stats))
+
+                        except Exception as e:
+                            with open(log_file, "a") as log:
+                                log.write(f"Error processing [{leaf_id}] in group [{group_name}]: {str(e)}\n")
+                        
+                        finally:
+                            processed_count += 1
+                            progress_val = processed_count / total_images
+                            self.progress.after(0, lambda p=progress_val: self.progress.set(p))
+
+                # 5. Generate HTML report
+                try:
+                    # Check for optional GUI variables (CSV export, etc)
+                    gen_csv = getattr(self, "csv_var", None) and self.csv_var.get()
+                    keep_svg = getattr(self, "keep_svgs_var", None) and self.keep_svgs_var.get()
+
+                    report_file = write_html_report(
+                        grouped_stats=self.grouped_stats,
+                        outdir=folder,
+                        generate_csv=gen_csv,
+                        keep_svgs=keep_svg,
+                        log_file=log_file
+                    )
+                    
+                    self.status.after(0, lambda: self.status.configure(
+                        text="Success! Report generated.", text_color="green"
+                    ))
+                except Exception as e:
+                    with open(log_file, "a") as log:
+                        log.write(f"HTML Generation Failed: {e}\n")
+                    self.status.after(0, lambda: self.status.configure(
+                        text="Report generation failed. Check log.", text_color="red"
+                    ))
+
+            except Exception as e:
+                # Catch-all for thread-level crashes
+                print(f"Critical error in metrics thread: {e}")
+            
+            finally:
+                # 6. Re-enable UI
+                self.run_btn.after(0, lambda: self.run_btn.configure(state="normal"))
+
+            
+    # -----------------------------
+    # Feature extraction functions
+    # -----------------------------
+    @staticmethod
+    def extract_features(mask, pixel_size_um=None):
+        labeled_mask = label(mask)
+        features_list = []
+        for region in regionprops(labeled_mask):
+            if region.area < 20: continue
+            f = {
+                'area_px': region.area,
+                'perimeter_px': region.perimeter,
+                'major_axis': region.axis_major_length,
+                'minor_axis': region.axis_minor_length,
+                'aspect_ratio': region.axis_major_length / region.axis_minor_length if region.axis_minor_length > 0 else 0,
+                'eccentricity': region.eccentricity,
+                'orientation': region.orientation,
+                'solidity': region.solidity,
+                'circularity': (4*np.pi*region.area/(region.perimeter**2)) if region.perimeter > 0 else 0,
+                'centroid_y': region.centroid[0], 'centroid_x': region.centroid[1]
+            }
+            if pixel_size_um:
+                f['area_um2'] = f['area_px'] * (pixel_size_um ** 2)
+                f['centroid_x_um'] = f['centroid_x'] * pixel_size_um
+                f['centroid_y_um'] = f['centroid_y'] * pixel_size_um
+            features_list.append(f)
+        return features_list
 
 def compute_spatial_metrics(features):
     centroids = np.array([[f.get('centroid_y_um',0), f.get('centroid_x_um',0)] for f in features])
@@ -577,7 +543,7 @@ def analyze_leaf_from_mask(leaf_mask_tensor, pixel_size_um=0.299):
     else:
         mask = leaf_mask_tensor
 
-    features = extract_features(mask, pixel_size_um)
+    features = MetricsTab.extract_features(mask, pixel_size_um)
     df = pd.DataFrame(features)
     df_numeric = df.select_dtypes(include=[np.number])
     if len(df_numeric) == 0:
@@ -604,6 +570,8 @@ def analyze_leaf_from_mask(leaf_mask_tensor, pixel_size_um=0.299):
     }
 
     return stats_dict
+
+
 
 
 

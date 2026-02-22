@@ -20,7 +20,7 @@ from ui.metrics import MetricsTab
 # -------------------------------------------------
 # VERSION + GITHUB SETTINGS
 # -------------------------------------------------
-CURRENT_VERSION = "0.2.0"
+CURRENT_VERSION = "0.2.1"
 GITHUB_REPO = "erunyan-cpu/stomaScope"  
 
 
